@@ -1,0 +1,12 @@
+apiVersion: dns.k8s.delta10.nl/v1alpha1
+kind: DNSResolver
+metadata:
+  labels:
+    app.kubernetes.io/name: dnsresolver
+    app.kubernetes.io/instance: dnsresolver-sample
+    app.kubernetes.io/part-of: dns-resolution-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: dns-resolution-operator
+  name: dnsresolver-sample
+spec:
+  # TODO(user): Add fields here

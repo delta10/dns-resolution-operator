@@ -1,0 +1,8 @@
+apiVersion: dns.k8s.delta10.nl/v1alpha1
+kind: DNSResolver
+metadata:
+  name: whitelist
+  namespace: default
+spec:
+  domainList:
+  - google.com

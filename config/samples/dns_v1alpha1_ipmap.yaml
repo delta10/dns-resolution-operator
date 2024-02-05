@@ -1,0 +1,12 @@
+apiVersion: dns.k8s.delta10.nl/v1alpha1
+kind: IPMap
+metadata:
+  labels:
+    app.kubernetes.io/name: ipmap
+    app.kubernetes.io/instance: ipmap-sample
+    app.kubernetes.io/part-of: dns-resolution-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: dns-resolution-operator
+  name: ipmap-sample
+spec:
+  # TODO(user): Add fields here

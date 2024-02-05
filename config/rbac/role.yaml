@@ -1,0 +1,46 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - dns.k8s.delta10.nl
+  resources:
+  - dnsresolvers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - dns.k8s.delta10.nl
+  resources:
+  - dnsresolvers/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - dns.k8s.delta10.nl
+  resources:
+  - dnsresolvers/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - dns.k8s.delta10.nl
+  resources:
+  - ipmaps
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - dns.k8s.delta10.nl
+  resources:
+  - ipmaps/finalizers
+  verbs:
+  - update

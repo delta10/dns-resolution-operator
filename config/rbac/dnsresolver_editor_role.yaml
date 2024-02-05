@@ -1,0 +1,31 @@
+# permissions for end users to edit dnsresolvers.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: dnsresolver-editor-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: dns-resolution-operator
+    app.kubernetes.io/part-of: dns-resolution-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: dnsresolver-editor-role
+rules:
+- apiGroups:
+  - dns.k8s.delta10.nl
+  resources:
+  - dnsresolvers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - dns.k8s.delta10.nl
+  resources:
+  - dnsresolvers/status
+  verbs:
+  - get
