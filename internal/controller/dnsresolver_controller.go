@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"os"
 	"time"
 
 	errors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,6 +35,20 @@ import (
 type DNSResolverReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+}
+
+var Config struct {
+	EnableIPv6     bool
+	DNSEnvironment string
+}
+
+func init() {
+	Config.EnableIPv6 = false
+	if s := os.Getenv("DNS_ENABLE_IPV6"); s == "1" {
+		Config.EnableIPv6 = true
+	}
+
+	Config.DNSEnvironment = os.Getenv("DNS_ENVIRONMENT")
 }
 
 //+kubebuilder:rbac:groups=dns.k8s.delta10.nl,resources=dnsresolvers,verbs=get;list;watch
@@ -104,20 +119,17 @@ func (r *DNSResolverReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 		// The IPMap matching `resolver` exists, so we update it
 
-		log.Info("Updating IPMap", "IPMap.Namespace", req.Namespace, "IPMap.Name", req.Name)
-
 		updated, minttl, err := ipmapUpdate(ipMap, resolver.Spec.DomainList, options)
 		if err != nil {
 			log.Error(err, "failed to generate IPMap Data (update)")
 			return default_result_obj, err
 		}
 		if updated {
+			log.Info("Updating IPMap", "IPMap.Namespace", req.Namespace, "IPMap.Name", req.Name)
 			if err := r.Update(ctx, ipMap); err != nil {
 				log.Error(err, "failed to update IPMap resource")
 				return default_result_obj, err
 			}
-		} else {
-			log.Info("IPMap unchanged", "IPMap.Namespace", req.Namespace, "IPMap.Name", req.Name)
 		}
 
 		requeue := time.Second * time.Duration(minttl+1)

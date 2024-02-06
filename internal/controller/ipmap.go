@@ -36,15 +36,17 @@ func lookupDomain(domain string) ([]net.IP, uint32, error) {
 	}
 
 	c := new(dns.Client)
-	m4 := new(dns.Msg)
-	m6 := new(dns.Msg)
+	if Config.DNSEnvironment == "local-tcp" {
+		config.Servers = []string{"127.0.0.1"}
+		c.Net = "tcp"
+	}
 
+	m4 := new(dns.Msg)
 	m4.SetQuestion(dns.Fqdn(domain), dns.TypeA)
-	m6.SetQuestion(dns.Fqdn(domain), dns.TypeAAAA)
 
 	var r4, r6 *dns.Msg
 	for _, server := range config.Servers {
-		r4, _, err = c.Exchange(m4, server+":53")
+		r4, _, err = c.Exchange(m4, server+":"+config.Port)
 		if err == nil && r4.Rcode == dns.RcodeSuccess {
 			break
 		}
@@ -56,19 +58,6 @@ func lookupDomain(domain string) ([]net.IP, uint32, error) {
 		return nil, 0, fmt.Errorf("DNS A query for %v failed with response code: %d", domain, r4.Rcode)
 	}
 
-	for _, server := range config.Servers {
-		r6, _, err = c.Exchange(m6, server+":53")
-		if err == nil && r6.Rcode == dns.RcodeSuccess {
-			break
-		}
-	}
-	if err != nil {
-		return nil, 0, err
-	}
-	if r6.Rcode != dns.RcodeSuccess {
-		return nil, 0, fmt.Errorf("DNS query for %v failed with response code: %d", domain, r6.Rcode)
-	}
-
 	// Loop through the answers to extract the TTL and A record
 	for _, ans := range r4.Answer {
 		if rec, ok := ans.(*dns.A); ok {
@@ -77,11 +66,28 @@ func lookupDomain(domain string) ([]net.IP, uint32, error) {
 		}
 	}
 
-	// Loop through the answers to extract the TTL and AAAA record
-	for _, ans := range r6.Answer {
-		if rec, ok := ans.(*dns.AAAA); ok {
-			ips = append(ips, rec.AAAA)
-			ttl = min(ttl, rec.Hdr.Ttl)
+	if Config.EnableIPv6 {
+		m6 := new(dns.Msg)
+		m6.SetQuestion(dns.Fqdn(domain), dns.TypeAAAA)
+		for _, server := range config.Servers {
+			r6, _, err = c.Exchange(m6, server+":53")
+			if err == nil && r6.Rcode == dns.RcodeSuccess {
+				break
+			}
+		}
+		if err != nil {
+			return nil, 0, err
+		}
+		if r6.Rcode != dns.RcodeSuccess {
+			return nil, 0, fmt.Errorf("DNS AAAA query for %v failed with response code: %d", domain, r6.Rcode)
+		}
+
+		// Loop through the answers to extract the TTL and AAAA record
+		for _, ans := range r6.Answer {
+			if rec, ok := ans.(*dns.AAAA); ok {
+				ips = append(ips, rec.AAAA)
+				ttl = min(ttl, rec.Hdr.Ttl)
+			}
 		}
 	}
 
@@ -98,15 +104,14 @@ func appendIfMissing(slice []string, str string) (bool, []string) {
 	return true, slice
 }
 
-func getIpMapDomainOrCreate(ipMap *dnsv1alpha1.IPMap, domain string) (*dnsv1alpha1.IPList, bool) {
-	for _, ipList := range ipMap.Data.Domains {
+func getIpMapDomainOrCreate(ipMap *dnsv1alpha1.IPMap, domain string) (int, bool) {
+	for i, ipList := range ipMap.Data.Domains {
 		if ipList.Domain == domain {
-			return &ipList, false
+			return i, false
 		}
 	}
 	ipMap.Data.Domains = append(ipMap.Data.Domains, dnsv1alpha1.IPList{Domain: domain})
-	index := len(ipMap.Data.Domains) - 1
-	return &ipMap.Data.Domains[index], true
+	return len(ipMap.Data.Domains) - 1, true
 }
 
 type ipMapOptions struct {
@@ -160,7 +165,9 @@ func ipmapUpdate(ipMap *dnsv1alpha1.IPMap, domainList []string, options *ipMapOp
 		var ipList *dnsv1alpha1.IPList
 		if options.CreateDomainIPMapping {
 			var created bool
-			ipList, created = getIpMapDomainOrCreate(ipMap, domain)
+			var index int
+			index, created = getIpMapDomainOrCreate(ipMap, domain)
+			ipList = &ipMap.Data.Domains[index]
 			if created {
 				updated = true
 			}
