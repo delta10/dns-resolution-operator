@@ -1,5 +1,5 @@
 # Adds namespace to all resources.
-namespace: dns-resolution-operator-system
+namespace: dns-resolution-operator
 
 # Value of this field is prepended to the
 # names of all resources, e.g. a deployment named
