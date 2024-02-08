@@ -3,6 +3,16 @@ entries:
   dns-resolution-operator:
   - apiVersion: v2
     appVersion: 0.1.0-alpha
+    created: "2024-02-08T18:17:14.1314689Z"
+    description: An operator to generate API resources with resolved IP addresses
+    digest: 9eb1af696de94e7047bfb1fce1d1eacccebd033dd6f5f55ab818f755d8376b17
+    name: dns-resolution-operator
+    type: application
+    urls:
+    - https://github.com/delta10/dns-resolution-operator/releases/download/chart-0.1.3/dns-resolution-operator-0.1.3.tgz
+    version: 0.1.3
+  - apiVersion: v2
+    appVersion: 0.1.0-alpha
     created: "2024-02-08T17:37:40.43905322Z"
     description: An operator to generate API resources with resolved IP addresses
     digest: 09c3fe1590c5cf185f5e8e0f3b099285f9391d039b3c2334ceab19c4f696590a
@@ -21,4 +31,4 @@ entries:
     urls:
     - https://github.com/delta10/dns-resolution-operator/releases/download/dns-resolution-operator-0.1.1/dns-resolution-operator-0.1.1.tgz
     version: 0.1.1
-generated: "2024-02-08T17:37:40.439065252Z"
+generated: "2024-02-08T18:17:14.13148534Z"
