@@ -100,6 +100,7 @@ func init() {
 //+kubebuilder:rbac:groups=dns.k8s.delta10.nl,resources=dnsresolvers/finalizers,verbs=update
 //+kubebuilder:rbac:groups=dns.k8s.delta10.nl,resources=ipmaps,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=dns.k8s.delta10.nl,resources=ipmaps/finalizers,verbs=update
+//+kubebuilder:rbac:groups="",resources=endpoints,verbs=get;list;watch
 
 // Reconcile makes sure that each DNSResolver has an associated IPMap.
 // It gets triggered by changes in DNSResolvers

@@ -5,6 +5,14 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - endpoints
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - dns.k8s.delta10.nl
   resources:
   - dnsresolvers

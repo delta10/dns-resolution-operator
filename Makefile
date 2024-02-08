@@ -3,7 +3,7 @@
 # To re-generate a bundle for another specific version without changing the standard setup, you can:
 # - use the VERSION as arg of the bundle target (e.g make bundle VERSION=0.0.2)
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
-VERSION ?= 0.0.1
+export VERSION ?= 0.1.0
 
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
@@ -189,19 +189,28 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 HELMIFY = $(LOCALBIN)/helmify
+export YQ = $(LOCALBIN)/yq
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.0.1
 CONTROLLER_TOOLS_VERSION ?= v0.12.0
 HELMIFY_VERSION ?= v0.4.10
+YQ_VERSION ?= latest
 
 .PHONY: helmify
 helmify: $(HELMIFY) ## Download helmify locally if necessary.
 $(HELMIFY): $(LOCALBIN)
-	test -s $(LOCALBIN)/helmify || GOBIN=$(LOCALBIN) go install github.com/arttor/helmify/cmd/helmify@${HELMIFY_VERSION}
+	test -s $(LOCALBIN)/helmify || GOBIN=$(LOCALBIN) go install github.com/arttor/helmify/cmd/helmify@$(HELMIFY_VERSION)
 
-helm: manifests kustomize helmify
-	$(KUSTOMIZE) build config/default | $(HELMIFY) -crd-dir
+helm: manifests kustomize helmify yq
+	rm -r helm/chart
+	$(KUSTOMIZE) build config/default | $(HELMIFY) -crd-dir helm/chart
+	cd helm && ./patches.sh
+
+.PHONY: yq
+yq: $(YQ) ## Download yq locally if necessary
+$(YQ): $(LOCALBIN)
+	test -s $(LOCALBIN)/yq || GOBIN=$(LOCALBIN) go install github.com/mikefarah/yq/v4@$(YQ_VERSION)
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary. If wrong version is installed, it will be removed before downloading.
