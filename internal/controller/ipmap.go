@@ -20,75 +20,63 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"time"
 
 	dnsv1alpha1 "github.com/delta10/dns-resolution-operator/api/v1alpha1"
 	"github.com/miekg/dns"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // Look up IPv4 and IPv6 addresses, return as an IP slice and return smallest TTL received
-func lookupDomain(domain string) ([]net.IP, uint32, error) {
-	var ips []net.IP
-	ttl := uint32(3600)
-
-	config, err := dns.ClientConfigFromFile("/etc/resolv.conf")
-	if err != nil {
-		return nil, 0, fmt.Errorf("Failed to read /etc/resolv.conf")
-	}
+func lookupDomain(domain string) (ips []net.IP, ttl uint32, err error) {
+	ttl = uint32(Config.MaxRequeueTime)
 
 	c := new(dns.Client)
-	if Config.DNSEnvironment == "local-tcp" {
-		config.Servers = []string{"127.0.0.1"}
-		c.Net = "tcp"
-	}
+	c.Net = Config.DNSProtocol
+	config := Config.DNS
 
 	m4 := new(dns.Msg)
 	m4.SetQuestion(dns.Fqdn(domain), dns.TypeA)
 
-	var r4, r6 *dns.Msg
+	var success bool
 	for _, server := range config.Servers {
-		r4, _, err = c.Exchange(m4, server+":"+config.Port)
-		if err == nil && r4.Rcode == dns.RcodeSuccess {
-			break
+		res, _, err := c.Exchange(m4, server+":"+config.Port)
+		if err == nil && res.Rcode == dns.RcodeSuccess {
+			success = true
+			// Loop through the answer to extract the TTL and A records
+			for _, ans := range res.Answer {
+				if rec, ok := ans.(*dns.A); ok {
+					ips = append(ips, rec.A)
+					ttl = min(ttl, rec.Hdr.Ttl)
+				}
+			}
 		}
 	}
-	if err != nil {
-		return nil, 0, err
-	}
-	if r4.Rcode != dns.RcodeSuccess {
-		return nil, 0, fmt.Errorf("DNS A query for %v failed with response code: %d", domain, r4.Rcode)
-	}
-
-	// Loop through the answers to extract the TTL and A record
-	for _, ans := range r4.Answer {
-		if rec, ok := ans.(*dns.A); ok {
-			ips = append(ips, rec.A)
-			ttl = min(ttl, rec.Hdr.Ttl)
-		}
+	if !success {
+		return nil, 0, fmt.Errorf("No DNS servers could be queried successfully for A records")
 	}
 
 	if Config.EnableIPv6 {
+		success = false
 		m6 := new(dns.Msg)
 		m6.SetQuestion(dns.Fqdn(domain), dns.TypeAAAA)
 		for _, server := range config.Servers {
-			r6, _, err = c.Exchange(m6, server+":53")
-			if err == nil && r6.Rcode == dns.RcodeSuccess {
-				break
+			res, _, err := c.Exchange(m4, server+":"+config.Port)
+			if err == nil && res.Rcode == dns.RcodeSuccess {
+				success = true
+			}
+			// Loop through the answer to extract the TTL and AAAA records
+			for _, ans := range res.Answer {
+				if rec, ok := ans.(*dns.AAAA); ok {
+					ips = append(ips, rec.AAAA)
+					ttl = min(ttl, rec.Hdr.Ttl)
+				}
 			}
 		}
-		if err != nil {
-			return nil, 0, err
-		}
-		if r6.Rcode != dns.RcodeSuccess {
-			return nil, 0, fmt.Errorf("DNS AAAA query for %v failed with response code: %d", domain, r6.Rcode)
+		if !success {
+			return nil, 0, fmt.Errorf("No DNS servers could be queried successfully for AAAA records")
 		}
 
-		// Loop through the answers to extract the TTL and AAAA record
-		for _, ans := range r6.Answer {
-			if rec, ok := ans.(*dns.AAAA); ok {
-				ips = append(ips, rec.AAAA)
-				ttl = min(ttl, rec.Hdr.Ttl)
-			}
-		}
 	}
 
 	return ips, ttl, nil
@@ -104,75 +92,107 @@ func appendIfMissing(slice []string, str string) (bool, []string) {
 	return true, slice
 }
 
-func getIpMapDomainOrCreate(ipMap *dnsv1alpha1.IPMap, domain string) (int, bool) {
-	for i, ipList := range ipMap.Data.Domains {
-		if ipList.Domain == domain {
+func getIpMapDomainOrCreate(ip_map *dnsv1alpha1.IPMap, domain string) (int, bool) {
+	for i, ip_list := range ip_map.Data.Domains {
+		if ip_list.Domain == domain {
 			return i, false
 		}
 	}
-	ipMap.Data.Domains = append(ipMap.Data.Domains, dnsv1alpha1.IPList{Domain: domain})
-	return len(ipMap.Data.Domains) - 1, true
+	ip_map.Data.Domains = append(ip_map.Data.Domains, dnsv1alpha1.IPList{Domain: domain})
+	return len(ip_map.Data.Domains) - 1, true
 }
 
-type ipMapOptions struct {
-	CreateDomainIPMapping bool
+// Remove expired IPs from ip_map. Then clean the cache
+func purgeExpired(ip_map *dnsv1alpha1.IPMap) bool {
+	ipmap_name := types.NamespacedName{
+		Namespace: ip_map.GetNamespace(),
+		Name:      ip_map.GetName(),
+	}
+	var updated bool
+
+	if !IPCache.NameExists(ipmap_name) {
+		return updated
+	}
+
+	for i := range ip_map.Data.Domains {
+		domain := &ip_map.Data.Domains[i]
+		ips_new := make([]string, 0, len(domain.IPs))
+		for _, ip := range domain.IPs {
+			expiration := IPCache.Get(ipmap_name, ip)
+			if expiration.Before(time.Now()) {
+				IPCache.Delete(ipmap_name, ip)
+				updated = true
+			} else {
+				ips_new = append(ips_new, ip)
+			}
+		}
+		domain.IPs = ips_new
+	}
+
+	IPCache.CleanUp(ipmap_name)
+	return updated
 }
 
 // Update an IPMap with a list of IP addresses (CIDR notation) for each domain in domainList.
-// Return true if ipMap.Data was updated.
-// The second return value is the minimum TTL of all TTLs received in DNS lookups
-func ipmapUpdate(ipMap *dnsv1alpha1.IPMap, domainList []string, options *ipMapOptions) (bool, uint32, error) {
-	updated := false
-	minttl := uint32(3600)
+// Return updated = true if ip_map.Data was updated.
+// minttl is the minimum TTL of all TTLs received in DNS lookups
+func ipmapUpdate(
+	ip_map *dnsv1alpha1.IPMap,
+	domainList []string,
+	options *ipMapOptions,
+) (updated bool, minttl uint32, err error) {
+	minttl = uint32(Config.MaxRequeueTime)
+	ipmap_name := types.NamespacedName{
+		Namespace: ip_map.GetNamespace(),
+		Name:      ip_map.GetName(),
+	}
 
-	if ipMap.Data == nil {
-		ipMap.Data = new(dnsv1alpha1.IPMapData)
+	if ip_map.Data == nil {
+		ip_map.Data = new(dnsv1alpha1.IPMapData)
 		updated = true
 	}
 
 	if options.CreateDomainIPMapping {
 		// Remove domains that are no longer requested
 	OUTER:
-		for i, old_domain := range ipMap.Data.Domains {
+		for i, old_domain := range ip_map.Data.Domains {
 			for _, domain := range domainList {
 				if domain == old_domain.Domain {
 					continue OUTER
 				}
 			}
 			// not found in requested domains
-			newlen := len(ipMap.Data.Domains) - 1
-			ipMap.Data.Domains[i] = ipMap.Data.Domains[newlen]
-			ipMap.Data.Domains = ipMap.Data.Domains[:newlen]
+			newlen := len(ip_map.Data.Domains) - 1
+			ip_map.Data.Domains[i] = ip_map.Data.Domains[newlen]
+			ip_map.Data.Domains = ip_map.Data.Domains[:newlen]
 			updated = true
 		}
 	} else {
-		// Make sure there is only a domain "" in the ipMap Data
-		if len(ipMap.Data.Domains) > 1 {
-			ipMap.Data = new(dnsv1alpha1.IPMapData)
-			_, _ = getIpMapDomainOrCreate(ipMap, "")
+		// Make sure there is only a domain "" in the ip_map Data
+		if len(ip_map.Data.Domains) > 1 {
+			ip_map.Data = new(dnsv1alpha1.IPMapData)
+			_, _ = getIpMapDomainOrCreate(ip_map, "")
 			updated = true
-		} else if len(ipMap.Data.Domains) == 0 {
-			_, _ = getIpMapDomainOrCreate(ipMap, "")
+		} else if len(ip_map.Data.Domains) == 0 {
+			_, _ = getIpMapDomainOrCreate(ip_map, "")
 			updated = true
-		} else if ipMap.Data.Domains[0].Domain != "" {
-			ipMap.Data = new(dnsv1alpha1.IPMapData)
-			_, _ = getIpMapDomainOrCreate(ipMap, "")
+		} else if ip_map.Data.Domains[0].Domain != "" {
+			ip_map.Data = new(dnsv1alpha1.IPMapData)
+			_, _ = getIpMapDomainOrCreate(ip_map, "")
 			updated = true
 		}
 	}
 
 	for _, domain := range domainList {
-		var ipList *dnsv1alpha1.IPList
+		var ip_list *dnsv1alpha1.IPList
 		if options.CreateDomainIPMapping {
-			var created bool
-			var index int
-			index, created = getIpMapDomainOrCreate(ipMap, domain)
-			ipList = &ipMap.Data.Domains[index]
+			index, created := getIpMapDomainOrCreate(ip_map, domain)
+			ip_list = &ip_map.Data.Domains[index]
 			if created {
 				updated = true
 			}
 		} else {
-			ipList = &ipMap.Data.Domains[0]
+			ip_list = &ip_map.Data.Domains[0]
 		}
 		ips, ttl, err := lookupDomain(domain)
 		minttl = min(minttl, ttl)
@@ -188,12 +208,23 @@ func ipmapUpdate(ipMap *dnsv1alpha1.IPMap, domainList []string, options *ipMapOp
 			} else {
 				return updated, 0, errors.New("Failed to parse IP address in DNS response")
 			}
+
+			// Add IP to IPMap
+			ip_str := ip_net.String()
 			var appended bool
-			appended, ipList.IPs = appendIfMissing(ipList.IPs, ip_net.String())
+			appended, ip_list.IPs = appendIfMissing(ip_list.IPs, ip_str)
 			if appended {
 				updated = true
 			}
+
+			// Add expiration time to the IP cache
+			IPCache.Set(ipmap_name, ip_str, time.Now().Add(Config.IPExpiration))
 		}
 	}
+
+	if purgeExpired(ip_map) {
+		updated = true
+	}
+
 	return updated, minttl, nil
 }
