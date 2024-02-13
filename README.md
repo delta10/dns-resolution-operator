@@ -6,7 +6,7 @@
     - [Why this project is needed](#why-this-project-is-needed)
     - [How it works](#how-it-works)
     - [Internals](#internals)
-    - [WARNING: potential instability](#warning%3A-potential-instability)
+    - [WARNING: potential instability](#warning-potential-instability)
     - [Alternative solutions](#alternative-solutions)
   - [Deployment](#deployment)
     - [Helm](#helm)
@@ -25,7 +25,7 @@ dns-resolution-operator is a Kubernetes operator that creates API resources with
 
 This operator allows users to create an egress or ingress firewall in which certain hostnames (FQDNs) are whitelisted or blocked. Another operator, such as Kyverno, can be combined with dns-resolution-operator to create NetworkPolicies containing the resolved IP addresses of a list of hostnames. 
 
-The operator does its best to update resources immediately after the DNS server's cache expires. However, creating NetworkPolicies with this method may still cause instability ([see below](#warning%3A-potential-instability)). This project is only the first step towards creating a stable long-term solution. The next step will be to create a CoreDNS plugin that delivers new uncached records to the operator a few seconds before it refreshes the cache for other clients. Once this is done, the road is free to implement FQDN resolution in native Kubernetes NetworkPolicies.
+The operator does its best to update resources immediately after the DNS server's cache expires. However, creating NetworkPolicies with this method may still cause instability ([see below](#warning-potential-instability)). This project is only the first step towards creating a stable long-term solution. The next step will be to create a CoreDNS plugin that delivers new uncached records to the operator a few seconds before it refreshes the cache for other clients. Once this is done, the road is free to implement FQDN resolution in native Kubernetes NetworkPolicies.
 
 
 ### Why this project is needed 
@@ -101,7 +101,7 @@ As long as this plugin does not exist, there are a few things you can do to redu
 
 ### Alternative solutions
 - [egress-operator](https://github.com/monzo/egress-operator) by Monzo. A very smart solution that runs a Layer 4 proxy for each whitelisted domain name. However, you need to run a proxy pod for each whitelisted domain, and you need to install a CoreDNS plugin to redirect traffic to the proxies. See also their [blog post](https://github.com/monzo/egress-operator).
-- [FQDNNetworkPolicies](https://github.com/GoogleCloudPlatform/gke-fqdnnetworkpolicies-golang). The GKE project is no longer maintained, but [there is a fork here](https://github.com/nais/fqdn-policy). The GKE project is quite similar to ours, but doesn't work well with hosts that dynamically return different A records. This project aims to have better stability in those sitations ([see above](#warning%3A-potential-instability)).
+- [FQDNNetworkPolicies](https://github.com/GoogleCloudPlatform/gke-fqdnnetworkpolicies-golang). The GKE project is no longer maintained, but [there is a fork here](https://github.com/nais/fqdn-policy). The GKE project is quite similar to ours, but doesn't work well with hosts that dynamically return different A records. This project aims to have better stability in those sitations ([see above](#warning-potential-instability)).
 - Service meshes such as Istio ([see docs](https://istio.io/latest/docs/tasks/traffic-management/egress/egress-control)) can be used to create an HTTPS egress proxy that only allows traffic to certain hostnames. Such a solution does not use DNS at all but TLS SNI (Server Name Indication). However, it can only be used for HTTPS traffic.
 - Some network plugins have a DNS-based solution, like CiliumNetworkPolicies ([see docs](https://docs.cilium.io/en/stable/security/policy/language/#dns-based)).
 
