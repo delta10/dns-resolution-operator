@@ -110,7 +110,7 @@ func init() {
 func (r *DNSResolverReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	default_result_obj := ctrl.Result{
-		RequeueAfter: time.Minute * 10,
+		RequeueAfter: time.Second * 10,
 	}
 
 	if Config.DNSEnvironment == "kubernetes" {

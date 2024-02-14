@@ -27,20 +27,39 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-// Look up IPv4 and IPv6 addresses, return as an IP slice and return smallest TTL received
-func lookupDomain(domain string) (ips []net.IP, ttl uint32, err error) {
-	ttl = uint32(Config.MaxRequeueTime)
-
+func dnsConns() (conns []*dns.Conn, err error) {
 	c := new(dns.Client)
 	c.Net = Config.DNSProtocol
 	config := Config.DNS
+	for _, server := range config.Servers {
+		conn, err := c.Dial(server + ":" + config.Port)
+		if err != nil {
+			return conns, err
+		}
+		conns = append(conns, conn)
+	}
+	return conns, nil
+}
+
+func closeConns(conns []*dns.Conn) (err error) {
+	for _, conn := range conns {
+		err = conn.Close()
+	}
+	return err
+}
+
+// Look up IPv4 and IPv6 addresses, return as an IP slice and return smallest TTL received
+func lookupDomain(domain string, conns []*dns.Conn) (ips []net.IP, ttl uint32, err error) {
+	ttl = uint32(Config.MaxRequeueTime)
+	ips = make([]net.IP, 0, 10)
 
 	m4 := new(dns.Msg)
 	m4.SetQuestion(dns.Fqdn(domain), dns.TypeA)
 
 	var success bool
-	for _, server := range config.Servers {
-		res, _, err := c.Exchange(m4, server+":"+config.Port)
+	for _, conn := range conns {
+		conn.WriteMsg(m4)
+		res, err := conn.ReadMsg()
 		if err == nil && res.Rcode == dns.RcodeSuccess {
 			success = true
 			// Loop through the answer to extract the TTL and A records
@@ -60,8 +79,9 @@ func lookupDomain(domain string) (ips []net.IP, ttl uint32, err error) {
 		success = false
 		m6 := new(dns.Msg)
 		m6.SetQuestion(dns.Fqdn(domain), dns.TypeAAAA)
-		for _, server := range config.Servers {
-			res, _, err := c.Exchange(m4, server+":"+config.Port)
+		for _, conn := range conns {
+			conn.WriteMsg(m6)
+			res, err := conn.ReadMsg()
 			if err == nil && res.Rcode == dns.RcodeSuccess {
 				success = true
 			}
@@ -104,7 +124,6 @@ func getIpMapDomainOrCreate(ip_map *dnsv1alpha1.IPMap, domain string) (int, bool
 
 // Remove expired IPs from ip_map. Then clean the cache
 func purgeExpired(ip_map *dnsv1alpha1.IPMap) bool {
-	debug := ctrl.Log.V(1)
 	ipmap_name := types.NamespacedName{
 		Namespace: ip_map.GetNamespace(),
 		Name:      ip_map.GetName(),
@@ -115,7 +134,6 @@ func purgeExpired(ip_map *dnsv1alpha1.IPMap) bool {
 		return updated
 	}
 
-	start_time := time.Now()
 	for i := range ip_map.Data.Domains {
 		domain := &ip_map.Data.Domains[i]
 		ips_new := make([]string, 0, len(domain.IPs))
@@ -130,11 +148,8 @@ func purgeExpired(ip_map *dnsv1alpha1.IPMap) bool {
 		}
 		domain.IPs = ips_new
 	}
-	debug.Info("Purged expired IPs", "duration", time.Since(start_time))
 
-	start_time = time.Now()
 	IPCache.CleanUp(ipmap_name)
-	debug.Info("CleanUP finished", "duration", time.Since(start_time))
 	return updated
 }
 
@@ -190,6 +205,11 @@ func ipmapUpdate(
 	}
 
 	start_time := time.Now()
+	conns, err := dnsConns()
+	defer closeConns(conns)
+	if err != nil {
+		return updated, 0, err
+	}
 	for _, domain := range domainList {
 		var ip_list *dnsv1alpha1.IPList
 		if options.CreateDomainIPMapping {
@@ -201,13 +221,15 @@ func ipmapUpdate(
 		} else {
 			ip_list = &ip_map.Data.Domains[0]
 		}
-		ips, ttl, err := lookupDomain(domain)
+
+		time_lookup := time.Now()
+		ips, ttl, err := lookupDomain(domain, conns)
+		debug.Info("DNS lookup completed", "domain", domain, "duration", time.Since(time_lookup))
 		minttl = min(minttl, ttl)
 		if err != nil {
 			return updated, 0, err
 		}
 
-		time_append := time.Now()
 		for _, ip := range ips {
 			ip_net := new(net.IPNet)
 			if ip.To4() != nil {
@@ -229,13 +251,14 @@ func ipmapUpdate(
 			// Add expiration time to the IP cache
 			IPCache.Set(ipmap_name, ip_str, time.Now().Add(Config.IPExpiration))
 		}
-		debug.Info("appendIfMissings completed", "domain", domain, "duration", time.Since(time_append))
 	}
 	debug.Info("IPMap Refresh logic completed", "duration", time.Since(start_time))
 
+	start_time = time.Now()
 	if purgeExpired(ip_map) {
 		updated = true
 	}
+	debug.Info("purgExpired completed", "duration", time.Since(start_time))
 
 	return updated, minttl, nil
 }
