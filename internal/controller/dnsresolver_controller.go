@@ -64,10 +64,13 @@ func init() {
 	Config.DNSEnvironment = os.Getenv("DNS_ENVIRONMENT")
 	Config.DNS = new(dns.ClientConfig)
 	switch os.Getenv("DNS_ENVIRONMENT") {
-	case "local-tcp":
+	case "resolv.conf-tcp":
 		Config.DNSProtocol = "tcp"
-		Config.DNS.Servers = []string{"127.0.0.1"}
-		Config.DNS.Port = "53"
+		var err error
+		Config.DNS, err = dns.ClientConfigFromFile("/etc/resolv.conf")
+		if err != nil {
+			panic("Could not open /etc/resolv.conf")
+		}
 	case "resolv.conf":
 		Config.DNSProtocol = "udp"
 		var err error

@@ -17,7 +17,6 @@ limitations under the License.
 package controller
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -25,6 +24,7 @@ import (
 	dnsv1alpha1 "github.com/delta10/dns-resolution-operator/api/v1alpha1"
 	"github.com/miekg/dns"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 // Look up IPv4 and IPv6 addresses, return as an IP slice and return smallest TTL received
@@ -104,6 +104,7 @@ func getIpMapDomainOrCreate(ip_map *dnsv1alpha1.IPMap, domain string) (int, bool
 
 // Remove expired IPs from ip_map. Then clean the cache
 func purgeExpired(ip_map *dnsv1alpha1.IPMap) bool {
+	debug := ctrl.Log.V(1)
 	ipmap_name := types.NamespacedName{
 		Namespace: ip_map.GetNamespace(),
 		Name:      ip_map.GetName(),
@@ -114,6 +115,7 @@ func purgeExpired(ip_map *dnsv1alpha1.IPMap) bool {
 		return updated
 	}
 
+	start_time := time.Now()
 	for i := range ip_map.Data.Domains {
 		domain := &ip_map.Data.Domains[i]
 		ips_new := make([]string, 0, len(domain.IPs))
@@ -128,8 +130,11 @@ func purgeExpired(ip_map *dnsv1alpha1.IPMap) bool {
 		}
 		domain.IPs = ips_new
 	}
+	debug.Info("Purged expired IPs", "duration", time.Since(start_time))
 
+	start_time = time.Now()
 	IPCache.CleanUp(ipmap_name)
+	debug.Info("CleanUP finished", "duration", time.Since(start_time))
 	return updated
 }
 
@@ -141,6 +146,7 @@ func ipmapUpdate(
 	domainList []string,
 	options *ipMapOptions,
 ) (updated bool, minttl uint32, err error) {
+	debug := ctrl.Log.V(1)
 	minttl = uint32(Config.MaxRequeueTime)
 	ipmap_name := types.NamespacedName{
 		Namespace: ip_map.GetNamespace(),
@@ -183,6 +189,7 @@ func ipmapUpdate(
 		}
 	}
 
+	start_time := time.Now()
 	for _, domain := range domainList {
 		var ip_list *dnsv1alpha1.IPList
 		if options.CreateDomainIPMapping {
@@ -199,6 +206,8 @@ func ipmapUpdate(
 		if err != nil {
 			return updated, 0, err
 		}
+
+		time_append := time.Now()
 		for _, ip := range ips {
 			ip_net := new(net.IPNet)
 			if ip.To4() != nil {
@@ -206,7 +215,7 @@ func ipmapUpdate(
 			} else if ip.To16() != nil {
 				ip_net = &net.IPNet{IP: ip, Mask: net.CIDRMask(128, 128)}
 			} else {
-				return updated, 0, errors.New("Failed to parse IP address in DNS response")
+				return updated, 0, fmt.Errorf("Failed to parse IP address in DNS response")
 			}
 
 			// Add IP to IPMap
@@ -220,7 +229,9 @@ func ipmapUpdate(
 			// Add expiration time to the IP cache
 			IPCache.Set(ipmap_name, ip_str, time.Now().Add(Config.IPExpiration))
 		}
+		debug.Info("appendIfMissings completed", "domain", domain, "duration", time.Since(time_append))
 	}
+	debug.Info("IPMap Refresh logic completed", "duration", time.Since(start_time))
 
 	if purgeExpired(ip_map) {
 		updated = true
