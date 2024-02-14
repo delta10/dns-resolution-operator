@@ -114,6 +114,7 @@ func (r *DNSResolverReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	if Config.DNSEnvironment == "kubernetes" {
+		Config.DNS.Servers = make([]string, 0, 2)
 		// Obtain the pod IPs of kube-dns
 		kube_dns_name := types.NamespacedName{
 			Namespace: "kube-system",

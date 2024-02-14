@@ -222,9 +222,7 @@ func ipmapUpdate(
 			ip_list = &ip_map.Data.Domains[0]
 		}
 
-		time_lookup := time.Now()
 		ips, ttl, err := lookupDomain(domain, conns)
-		debug.Info("DNS lookup completed", "domain", domain, "duration", time.Since(time_lookup))
 		minttl = min(minttl, ttl)
 		if err != nil {
 			return updated, 0, err
@@ -254,11 +252,9 @@ func ipmapUpdate(
 	}
 	debug.Info("IPMap Refresh logic completed", "duration", time.Since(start_time))
 
-	start_time = time.Now()
 	if purgeExpired(ip_map) {
 		updated = true
 	}
-	debug.Info("purgExpired completed", "duration", time.Since(start_time))
 
 	return updated, minttl, nil
 }
