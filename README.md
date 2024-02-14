@@ -186,9 +186,9 @@ spec:
           policyTypes:
             - Egress
           egress:
-            - to: "{{ (request.object.data.domains[].ips)[0] | map(&{cidr: @}, @) | items(@, 'foo', 'ipBlock') }}"
+            - to: "{{ (request.object.data.domains[].ips)[] | map(&{cidr: @}, @) | items(@, 'foo', 'ipBlock') }}"
             # the above is a workaround. the below doesn't work; see https://github.com/kyverno/kyverno/issues/9668
-            # - to: "{{(request.object.data.domains[].ips)[0] | map(&{ipBlock: {cidr: @} }, @)}}"
+            # - to: "{{(request.object.data.domains[].ips)[] | map(&{ipBlock: {cidr: @} }, @)}}"
 ```
 
 ### CoreDNS
