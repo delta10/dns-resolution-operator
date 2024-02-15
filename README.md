@@ -104,6 +104,7 @@ As long as this plugin does not exist, there are a few things you can do to redu
 - [FQDNNetworkPolicies](https://github.com/GoogleCloudPlatform/gke-fqdnnetworkpolicies-golang). The GKE project is no longer maintained, but [there is a fork here](https://github.com/nais/fqdn-policy). The GKE project is quite similar to ours, but doesn't work well with hosts that dynamically return different A records. This project aims to have better stability in those sitations ([see above](#warning-potential-instability)).
 - Service meshes such as Istio ([see docs](https://istio.io/latest/docs/tasks/traffic-management/egress/egress-control)) can be used to create an HTTPS egress proxy that only allows traffic to certain hostnames. Such a solution does not use DNS at all but TLS SNI (Server Name Indication). However, it can only be used for HTTPS traffic.
 - Some network plugins have a DNS-based solution, like CiliumNetworkPolicies ([see docs](https://docs.cilium.io/en/stable/security/policy/language/#dns-based)).
+- There is a [proposal](https://github.com/kubernetes-sigs/network-policy-api/blob/main/npeps/npep-133.md) to extende the NetworkPolicy API with an FQDN selector.
 
 ## Deployment
 ### Helm
