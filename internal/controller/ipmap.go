@@ -10,7 +10,7 @@ You may obtain a copy of the License at
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
+see the license for the specific language governing permissions and
 limitations under the License.
 */
 
@@ -159,7 +159,7 @@ func purgeExpired(ip_map *dnsv1alpha1.IPMap) bool {
 func ipmapUpdate(
 	ip_map *dnsv1alpha1.IPMap,
 	domainList []string,
-	options *ipMapOptions,
+	options *resolverOptions,
 ) (updated bool, minttl uint32, err error) {
 	debug := ctrl.Log.V(1)
 	minttl = uint32(Config.MaxRequeueTime)
@@ -173,35 +173,19 @@ func ipmapUpdate(
 		updated = true
 	}
 
-	if options.CreateDomainIPMapping {
-		// Remove domains that are no longer requested
-	OUTER:
-		for i, old_domain := range ip_map.Data.Domains {
-			for _, domain := range domainList {
-				if domain == old_domain.Domain {
-					continue OUTER
-				}
+	// Remove domains that are no longer requested
+OUTER:
+	for i, old_domain := range ip_map.Data.Domains {
+		for _, domain := range domainList {
+			if domain == old_domain.Domain {
+				continue OUTER
 			}
-			// not found in requested domains
-			newlen := len(ip_map.Data.Domains) - 1
-			ip_map.Data.Domains[i] = ip_map.Data.Domains[newlen]
-			ip_map.Data.Domains = ip_map.Data.Domains[:newlen]
-			updated = true
 		}
-	} else {
-		// Make sure there is only a domain "" in the ip_map Data
-		if len(ip_map.Data.Domains) > 1 {
-			ip_map.Data = new(dnsv1alpha1.IPMapData)
-			_, _ = getIpMapDomainOrCreate(ip_map, "")
-			updated = true
-		} else if len(ip_map.Data.Domains) == 0 {
-			_, _ = getIpMapDomainOrCreate(ip_map, "")
-			updated = true
-		} else if ip_map.Data.Domains[0].Domain != "" {
-			ip_map.Data = new(dnsv1alpha1.IPMapData)
-			_, _ = getIpMapDomainOrCreate(ip_map, "")
-			updated = true
-		}
+		// not found in requested domains
+		newlen := len(ip_map.Data.Domains) - 1
+		ip_map.Data.Domains[i] = ip_map.Data.Domains[newlen]
+		ip_map.Data.Domains = ip_map.Data.Domains[:newlen]
+		updated = true
 	}
 
 	start_time := time.Now()
@@ -210,16 +194,13 @@ func ipmapUpdate(
 	if err != nil {
 		return updated, 0, err
 	}
+
 	for _, domain := range domainList {
 		var ip_list *dnsv1alpha1.IPList
-		if options.CreateDomainIPMapping {
-			index, created := getIpMapDomainOrCreate(ip_map, domain)
-			ip_list = &ip_map.Data.Domains[index]
-			if created {
-				updated = true
-			}
-		} else {
-			ip_list = &ip_map.Data.Domains[0]
+		index, created := getIpMapDomainOrCreate(ip_map, domain)
+		ip_list = &ip_map.Data.Domains[index]
+		if created {
+			updated = true
 		}
 
 		ips, ttl, err := lookupDomain(domain, conns)

@@ -24,9 +24,9 @@ type DNSResolverSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MaxItems=500
 	DomainList []string `json:"domainList"`
-	// +kubebuilder:default=false
+	// +kubebuilder:default=NetworkPolicy
 	// +optional
-	CreateDomainIPMapping bool `json:"createDomainIPMapping"`
+	GenerateType string `json:"generateType"`
 }
 
 type DNSResolverStatus struct {

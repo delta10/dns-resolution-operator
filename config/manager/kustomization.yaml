@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: dns-resolution-operator
-  newTag: v0.1.1-alpha
+  newTag: v0.1.2-alpha

@@ -18,19 +18,21 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
 
 	"github.com/miekg/dns"
 	"k8s.io/api/core/v1"
-	errors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	networking "k8s.io/api/networking/v1"
 
 	dnsv1alpha1 "github.com/delta10/dns-resolution-operator/api/v1alpha1"
 )
@@ -40,17 +42,18 @@ type DNSResolverReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-type ipMapOptions struct {
-	CreateDomainIPMapping bool
+type resolverOptions struct {
+	GenerateType          string
 }
 
 var Config struct {
-	EnableIPv6     bool
-	IPExpiration   time.Duration
-	MaxRequeueTime uint32
-	DNS            *dns.ClientConfig
-	DNSProtocol    string
-	DNSEnvironment string
+	EnableIPv6         bool
+	IPExpiration       time.Duration
+	MaxRequeueTime     uint32
+	DNS                *dns.ClientConfig
+	DNSProtocol        string
+	DNSEnvironment     string
+	UpstreamDNSService string
 }
 
 var IPCache IPCacheT
@@ -82,6 +85,12 @@ func init() {
 		Config.DNSProtocol = "udp"
 		Config.DNS.Port = "53"
 		Config.DNSEnvironment = "kubernetes"
+		s := os.Getenv("DNS_UPSTREAM_SERVICE")
+		if s == "" {
+			Config.UpstreamDNSService = "kube-dns"
+		} else {
+			Config.UpstreamDNSService = s
+		}
 		// We add the servers at the beginning of every Reconcile
 	}
 	duration, err := time.ParseDuration(os.Getenv("IP_EXPIRATION"))
@@ -109,22 +118,21 @@ func init() {
 // It gets triggered by changes in DNSResolvers
 func (r *DNSResolverReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
-	default_result_obj := ctrl.Result{
-		RequeueAfter: time.Second * 10,
-	}
+	// result object used for errors
+	default_result_obj := ctrl.Result{}
 
 	if Config.DNSEnvironment == "kubernetes" {
 		Config.DNS.Servers = make([]string, 0, 2)
+
 		// Obtain the pod IPs of kube-dns
 		kube_dns_name := types.NamespacedName{
 			Namespace: "kube-system",
-			Name:      "kube-dns",
+			Name:      Config.UpstreamDNSService,
 		}
 		dns_ep := new(v1.Endpoints)
 		err := r.Get(ctx, kube_dns_name, dns_ep)
 		if err != nil {
-			log.Error(err, "unable to fetch kube-dns Endpoints")
-			return default_result_obj, err
+			return default_result_obj, fmt.Errorf("unable to fetch kube-dns Endpoints: %w", err)
 		}
 		for i := range dns_ep.Subsets {
 			for _, addr := range dns_ep.Subsets[i].Addresses {
@@ -143,13 +151,13 @@ func (r *DNSResolverReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			IPCache.Delete(req.NamespacedName, "")
 			log.Info("Removed IPMap from cache", "IPMap.Namespace", req.Namespace, "IPMap.Name", req.Name)
 		} else {
-			log.Error(err, "unable to fetch DNSResolver")
+			err = fmt.Errorf("unable to fetch DNSResolver: %w", err)
 		}
 		return default_result_obj, client.IgnoreNotFound(err)
 	}
 
-	options := &ipMapOptions{
-		CreateDomainIPMapping: resolver.Spec.CreateDomainIPMapping,
+	options := &resolverOptions{
+		GenerateType: resolver.Spec.GenerateType,
 	}
 
 	// Create an empty IPMap to populate later
@@ -159,6 +167,7 @@ func (r *DNSResolverReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// First, check if `resolver` has an associated IPMap already
 	get_err := r.Get(ctx, req.NamespacedName, ip_map)
+	ip_map.ObjectMeta.Labels = resolver.ObjectMeta.Labels
 
 	// Make sure the ownerRef on `resolver` is set to the IPMap we are working on
 	// This will fail if IPMap is already owned by another resource
@@ -168,49 +177,68 @@ func (r *DNSResolverReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	if get_err != nil && errors.IsNotFound(get_err) {
 
-		// There is no IPMap matching `resolver`, so we create one
-
-		log.Info("Creating IPMap", "IPMap.Namespace", req.Namespace, "IPMap.Name", req.Name)
+		// There is no IPMap matching `resolver`, so we create an IPMap and NetworkPolicy
 
 		_, minttl, err := ipmapUpdate(ip_map, resolver.Spec.DomainList, options)
 		if err != nil {
-			log.Error(err, "failed to generate IPMap Data")
-			return default_result_obj, err
+			return default_result_obj, fmt.Errorf("failed to generate IPMap Data: %w", err)
 		}
+
+		if options.GenerateType == "NetworkPolicy" {
+			if err := r.NPReconcile(ctx, ip_map); err != nil {
+				// We return so the IPMap does not get updated. This ensure we take the same code path next time
+				return default_result_obj, fmt.Errorf("failed to create NetworkPolicy: %w", err)
+			}
+		}
+
+		log.Info("Creating IPMap", "IPMap.Namespace", req.Namespace, "IPMap.Name", req.Name)
 		if err := r.Create(ctx, ip_map); err != nil {
-			log.Error(err, "failed to create IPMap resource")
-			return default_result_obj, err
+			return default_result_obj, fmt.Errorf("failed to create IPMap resource: %w", err)
 		}
 
 		requeue := time.Second * time.Duration(minttl+1)
 		log.Info("Requeueing DNSResolver", "RequeueAfter", requeue)
 		return ctrl.Result{RequeueAfter: requeue}, nil
 
-	} else if get_err != nil {
+	} else if get_err == nil {
 
-		log.Error(get_err, "failed to get IPMap")
-		return default_result_obj, get_err
-
-	} else {
-
-		// The IPMap matching `resolver` exists, so we update it
+		// The IPMap matching `resolver` exists, so we update it and the NetworkPolicy
 
 		updated, minttl, err := ipmapUpdate(ip_map, resolver.Spec.DomainList, options)
 		if err != nil {
-			log.Error(err, "failed to generate IPMap Data (update)")
-			return default_result_obj, err
+			return default_result_obj, fmt.Errorf("failed to generate IPMap Data (update): %w", err)
 		}
+
 		if updated {
+			if options.GenerateType == "NetworkPolicy" {
+				if err := r.NPReconcile(ctx, ip_map); err != nil {
+					// We return so the IPMap does not get updated. This ensure we take the same code path next time
+					return default_result_obj, fmt.Errorf("failed to update NetworkPolicy: %w", err)
+				}
+			}
 			log.Info("Updating IPMap", "IPMap.Namespace", req.Namespace, "IPMap.Name", req.Name)
 			if err := r.Update(ctx, ip_map); err != nil {
-				log.Error(err, "failed to update IPMap resource")
-				return default_result_obj, err
+				return default_result_obj, fmt.Errorf("failed to update IPMap resource: %w", err)
+			}
+		} else {
+			if options.GenerateType == "NetworkPolicy" {
+				// Note that if a NetworkPolicy exists we assume it is synced with the IPMap already. We still
+				// want to check if it exists in the no-update scenario, in case it was inadvertently deleted
+				np := new(networking.NetworkPolicy)
+				name := types.NamespacedName{Name: ip_map.Name, Namespace: ip_map.Namespace}
+				if err := r.Get(ctx, name, np); err != nil {
+					if err := r.NPReconcile(ctx, ip_map); err != nil {
+						return default_result_obj, fmt.Errorf("failed to create NetworkPolicy: %w", err)
+					}
+				}
 			}
 		}
 
 		requeue := time.Second * time.Duration(minttl+1)
 		log.Info("Requeueing DNSResolver", "RequeueAfter", requeue)
 		return ctrl.Result{RequeueAfter: requeue}, nil
+	} else {
+		return default_result_obj, fmt.Errorf("failed to get IPMap: %w", get_err)	
 	}
 }
 
