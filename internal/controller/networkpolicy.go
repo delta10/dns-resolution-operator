@@ -34,6 +34,9 @@ func NPGenerate(ip_map *dnsv1alpha1.IPMap) (np *networking.NetworkPolicy) {
 			Egress: []networking.NetworkPolicyEgressRule{
 				{To: tolist},
 			},
+			PolicyTypes: []networking.PolicyType{
+				networking.PolicyTypeEgress,
+			},
 		},
 	}
 
