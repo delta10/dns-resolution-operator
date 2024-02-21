@@ -29,8 +29,6 @@ func NPGenerate(ip_map *dnsv1alpha1.IPMap) (np *networking.NetworkPolicy) {
 		ObjectMeta: v1.ObjectMeta{
 			Name: ip_map.Name,
 			Namespace: ip_map.Namespace,
-			Labels: ip_map.Labels,
-			OwnerReferences: ip_map.OwnerReferences,
 		},
 		Spec: networking.NetworkPolicySpec{
 			Egress: []networking.NetworkPolicyEgressRule{
@@ -53,6 +51,8 @@ func (r DNSResolverReconciler) NPReconcile(ctx context.Context, ip_map *dnsv1alp
 		log.Info("Creating NetworkPolicy")
 
 		np := NPGenerate(ip_map)
+		np.ObjectMeta.OwnerReferences = ip_map.OwnerReferences
+		np.ObjectMeta.Labels = ip_map.Labels
 		if err := r.Create(ctx, np); err != nil {
 			return err
 		}
@@ -61,6 +61,8 @@ func (r DNSResolverReconciler) NPReconcile(ctx context.Context, ip_map *dnsv1alp
 
 		np := NPGenerate(ip_map)
 		np.ObjectMeta = old_np.ObjectMeta
+		np.ObjectMeta.OwnerReferences = ip_map.OwnerReferences
+		np.ObjectMeta.Labels = ip_map.Labels
 		if err := r.Update(ctx, np); err != nil {
 			return err
 		}

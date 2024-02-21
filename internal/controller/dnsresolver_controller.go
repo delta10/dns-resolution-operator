@@ -23,8 +23,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/miekg/dns"
 	"k8s.io/api/core/v1"
+	networking "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -32,7 +34,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	networking "k8s.io/api/networking/v1"
 
 	dnsv1alpha1 "github.com/delta10/dns-resolution-operator/api/v1alpha1"
 )
@@ -107,6 +108,10 @@ func init() {
 	}
 }
 
+func logRequeue(start time.Time, requeue time.Duration, log *logr.Logger) {
+	log.Info("Requeueing DNSResolver", "RequeueAfter", requeue, "Reconcile duration", time.Since(start).String())
+}
+
 //+kubebuilder:rbac:groups=dns.k8s.delta10.nl,resources=dnsresolvers,verbs=get;list;watch
 //+kubebuilder:rbac:groups=dns.k8s.delta10.nl,resources=dnsresolvers/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=dns.k8s.delta10.nl,resources=dnsresolvers/finalizers,verbs=update
@@ -119,6 +124,7 @@ func init() {
 // Reconcile makes sure that each DNSResolver has an associated IPMap.
 // It gets triggered by changes in DNSResolvers
 func (r *DNSResolverReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	start_time := time.Now()
 	log := log.FromContext(ctx)
 	// result object used for errors
 	default_result_obj := ctrl.Result{}
@@ -199,7 +205,7 @@ func (r *DNSResolverReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 		requeue := time.Second * time.Duration(minttl+1)
-		log.Info("Requeueing DNSResolver", "RequeueAfter", requeue)
+		logRequeue(start_time, requeue, &log)
 		return ctrl.Result{RequeueAfter: requeue}, nil
 
 	} else if get_err == nil {
@@ -237,7 +243,7 @@ func (r *DNSResolverReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 		requeue := time.Second * time.Duration(minttl+1)
-		log.Info("Requeueing DNSResolver", "RequeueAfter", requeue)
+		logRequeue(start_time, requeue, &log)
 		return ctrl.Result{RequeueAfter: requeue}, nil
 	} else {
 		return default_result_obj, fmt.Errorf("failed to get IPMap: %w", get_err)	
