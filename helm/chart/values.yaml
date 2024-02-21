@@ -32,7 +32,7 @@ controllerManager:
           - ALL
     image:
       repository: ghcr.io/delta10/dns-resolution-operator/controller
-      tag: v0.1.2-alpha
+      tag: v0.2.0-alpha
     resources:
       limits:
         cpu: 500m
@@ -40,6 +40,9 @@ controllerManager:
       requests:
         cpu: 100m
         memory: 128Mi
+    # Additional environment variables of the controller as key-value pairs
+    # For example:
+    # IP_EXPIRATION: 30s
     env: {}
   replicas: 1
   serviceAccount:

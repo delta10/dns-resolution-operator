@@ -31,14 +31,14 @@ spec:
             type: object
           spec:
             properties:
-              createDomainIPMapping:
-                default: false
-                type: boolean
               domainList:
                 items:
                   type: string
                 maxItems: 500
                 type: array
+              generateType:
+                default: NetworkPolicy
+                type: string
             required:
             - domainList
             type: object
