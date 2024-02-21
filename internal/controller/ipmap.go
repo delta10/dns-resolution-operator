@@ -50,6 +50,7 @@ func closeConns(conns []*dns.Conn) (err error) {
 
 // Look up IPv4 and IPv6 addresses, return as an IP slice and return smallest TTL received
 func lookupDomain(domain string, conns []*dns.Conn) (ips []net.IP, ttl uint32, err error) {
+	debug := ctrl.Log.V(1)
 	ttl = uint32(Config.MaxRequeueTime)
 	ips = make([]net.IP, 0, 10)
 
@@ -69,6 +70,9 @@ func lookupDomain(domain string, conns []*dns.Conn) (ips []net.IP, ttl uint32, e
 					ttl = min(ttl, rec.Hdr.Ttl)
 				}
 			}
+		} else if err == nil && res.Rcode == dns.RcodeNameError {
+			success = true
+			debug.Info("No records received for domain %v", domain)
 		}
 	}
 	if !success {
@@ -174,17 +178,18 @@ func ipmapUpdate(
 	}
 
 	// Remove domains that are no longer requested
+	doms := &ip_map.Data.Domains
 OUTER:
-	for i, old_domain := range ip_map.Data.Domains {
+	for i := len(*doms)-1; i >= 0; i--  {
 		for _, domain := range domainList {
-			if domain == old_domain.Domain {
+			if domain == (*doms)[i].Domain {
 				continue OUTER
 			}
 		}
 		// not found in requested domains
-		newlen := len(ip_map.Data.Domains) - 1
-		ip_map.Data.Domains[i] = ip_map.Data.Domains[newlen]
-		ip_map.Data.Domains = ip_map.Data.Domains[:newlen]
+		newlen := len(*doms) - 1
+		(*doms)[i] = (*doms)[newlen]
+		(*doms) = (*doms)[:newlen]
 		updated = true
 	}
 

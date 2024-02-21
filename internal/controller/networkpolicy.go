@@ -30,6 +30,7 @@ func NPGenerate(ip_map *dnsv1alpha1.IPMap) (np *networking.NetworkPolicy) {
 			Name: ip_map.Name,
 			Namespace: ip_map.Namespace,
 			Labels: ip_map.Labels,
+			OwnerReferences: ip_map.OwnerReferences,
 		},
 		Spec: networking.NetworkPolicySpec{
 			Egress: []networking.NetworkPolicyEgressRule{
@@ -37,6 +38,7 @@ func NPGenerate(ip_map *dnsv1alpha1.IPMap) (np *networking.NetworkPolicy) {
 			},
 		},
 	}
+
 	return
 }
 

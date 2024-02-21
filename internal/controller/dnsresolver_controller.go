@@ -112,6 +112,8 @@ func init() {
 //+kubebuilder:rbac:groups=dns.k8s.delta10.nl,resources=dnsresolvers/finalizers,verbs=update
 //+kubebuilder:rbac:groups=dns.k8s.delta10.nl,resources=ipmaps,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=dns.k8s.delta10.nl,resources=ipmaps/finalizers,verbs=update
+//+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=endpoints,verbs=get;list;watch
 
 // Reconcile makes sure that each DNSResolver has an associated IPMap.
@@ -169,7 +171,7 @@ func (r *DNSResolverReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	get_err := r.Get(ctx, req.NamespacedName, ip_map)
 	ip_map.ObjectMeta.Labels = resolver.ObjectMeta.Labels
 
-	// Make sure the ownerRef on `resolver` is set to the IPMap we are working on
+	// Make sure the ownerRef on to the IPMap we are working on is set to resolver
 	// This will fail if IPMap is already owned by another resource
 	if err := controllerutil.SetControllerReference(&resolver, ip_map, r.Scheme); err != nil {
 		return default_result_obj, err
