@@ -2,6 +2,16 @@ apiVersion: v1
 entries:
   dns-resolution-operator:
   - apiVersion: v2
+    appVersion: 0.2.1-alpha
+    created: "2024-02-21T16:04:43.819473173Z"
+    description: An operator to generate egress NetworkPolicies with resolved IP addresses
+    digest: b8fe49c46a29e536ca83739f833f8269b3280d46b992e23b8e0757dd8ffd49a7
+    name: dns-resolution-operator
+    type: application
+    urls:
+    - https://github.com/delta10/dns-resolution-operator/releases/download/chart-0.2.1/dns-resolution-operator-0.2.1.tgz
+    version: 0.2.1
+  - apiVersion: v2
     appVersion: 0.2.0-alpha
     created: "2024-02-21T15:03:41.35782957Z"
     description: An operator to generate egress NetworkPolicies with resolved IP addresses
@@ -31,4 +41,4 @@ entries:
     urls:
     - https://github.com/delta10/dns-resolution-operator/releases/download/chart-0.1.2-alpha/dns-resolution-operator-0.1.2-alpha.tgz
     version: 0.1.2-alpha
-generated: "2024-02-21T15:03:41.357847673Z"
+generated: "2024-02-21T16:04:43.819495585Z"
