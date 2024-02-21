@@ -6,14 +6,13 @@
     - [Why this project is needed](#why-this-project-is-needed)
     - [How it works](#how-it-works)
     - [Internals](#internals)
-    - [WARNING: potential instability](#warning-potential-instability)
+    - [Potential instability](#potential-instability)
     - [Alternative solutions](#alternative-solutions)
   - [Deployment](#deployment)
     - [Helm](#helm)
     - [Local testing](#local-testing)
   - [Configuration](#configuration)
     - [Environment variables](#environment-variables)
-    - [Set up an egress firewall using Kyverno](#set-up-an-egress-firewall-using-kyverno)
     - [CoreDNS](#coredns)
     - [RBAC](#rbac)
   - [Roadmap](#roadmap)
@@ -21,20 +20,18 @@
 
 ## Project description
 
-dns-resolution-operator is a Kubernetes operator that creates API resources with the resolved IP addresses of domains. This project is in early development with a fully functional alpha release.
+dns-resolution-operator is a Kubernetes operator that creates NetworkPolicies in which egress traffic to a list of domain names is allowed. The operator takes care of resolving the domain names to a list of IP addresses. This project is in early development with a fully functional alpha release.
 
-This operator allows users to create an egress or ingress firewall in which certain hostnames (FQDNs) are whitelisted or blocked. Another operator, such as Kyverno, can be combined with dns-resolution-operator to create NetworkPolicies containing the resolved IP addresses of a list of hostnames. 
-
-The operator does its best to update resources immediately after the DNS server's cache expires. However, creating NetworkPolicies with this method may still cause instability ([see below](#warning-potential-instability)). This project is only the first step towards creating a stable long-term solution. The next step will be to create a CoreDNS plugin that delivers new uncached records to the operator a few seconds before it refreshes the cache for other clients. Once this is done, the road is free to implement FQDN resolution in native Kubernetes NetworkPolicies.
+This operator is best used in combination with the [k8s_cache plugin](https://github.com/delta10/k8s_cache) for CoreDNS. This allows the operator to update NetworkPolicies before the Cluster's DNS cache expires. Without the plugin, a small percentage of requests to domains with dynamic DNS responses will fail ([see below](#potential-instability)).
 
 
 ### Why this project is needed 
 
 Kubernetes [NetworkPolicies](https://kubernetes.io/docs/concepts/services-networking/network-policies/) can be used to allow or block ingress and egress traffic to parts of the cluster. While NetworkPolicies support allowing and blocking IP ranges, there is no support for hostnames. Such a feature is particularly useful for those who want to block all egress traffic except for a couple of whitelisted hostnames.
 
-[Existing solutions](#alternative-solutions) all have their limitations. There is a need for a simple solution based on DNS, that does not require a proxy nor altering DNS records and that works for any type of traffic (not just HTTPS).
+Existing solutions all have their [limitations](#alternative-solutions). There is a need for a simple solution based on DNS, that does not require a proxy nor altering DNS records and that works for any type of traffic (not just HTTPS). This solution should also be stable for domains with dynamic DNS reponses.
 
-dns-resolution-operator is this simple solution. All it does is resolve FQDNs and store them in "IPMap" API resources. Another operator such as Kyverno can be used to generate native Kubernetes NetworkPolicies using these IP addresses. [See the instructions below.](#set-up-an-egress-firewall-using-kyverno)
+dns-resolution-operator is this simple solution. All it does is resolve FQDNs, store them in "IPMap" custom resources, and update NetworkPolicies with the resolved IP addresses.
 
 ### How it works
 
@@ -47,61 +44,59 @@ metadata:
   name: whitelist-google
   namespace: default
 spec:
-  createDomainIPMapping: true # whether to keep the association between domain and IP in the resulting IPMap
   domainList:
   - google.com
   - www.google.com
 ```
 
-It will then create IPMaps like the following:
+It will then create NetworkPolicies like the following:
 
-```
-apiVersion: dns.k8s.delta10.nl/v1alpha1
-kind: IPMap
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
 metadata:
   name: whitelist-google
   namespace: default
-data:
-  domains:
-  - ips:
-    - 142.250.179.142/32
-    - 142.251.39.110/32
-    name: google.com
-  - ips:
-    - 142.251.36.36/32
-    - 142.250.179.164/32
-    name: www.google.com
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - ipBlock:
+        cidr: 142.250.179.132/32
+  - to:
+    - ipBlock:
+        cidr: 172.217.23.196/32
 ```
 
-For creating NetworkPolicies [see below](#set-up-an-egress-firewall-using-kyverno).
+To keep track of the mapping between domain name and policy, the operator also creates custom resources called IPMaps. Administrators who want to generate customized NetworkPolicies can do so on the basis of the IPMaps (using another operator such as Kyverno). To disable the generation of NetworkPolicies, set `spec.generateType` to "IPMap".
 
 ### Internals 
 
-The controller pod of dns-resolution-operator watches API resources of kind DNSResolver, which contain lists of domain names. The controller looks up the IP addresses of all domain names and appends them to an API resource of kind IPMap.
+The controller pod of dns-resolution-operator watches API resources of kind DNSResolver, which contain lists of domain names. The controller looks up the IP addresses of all domain names and appends them to a custom resource of kind IPMap and a NetworkPolicy, both with the same name and namespace as the DNSResolver.
 
-On each reconciliation of a DNSResolver, the controller first queries the API server for kube-dns endpoints. It adds each endpoint to its list of DNS servers (the kube-dns service is bypassed). It then queries each DNS server for A records for each of the domains in the DNSResolver. It is necessary to query all servers, since each server has its own internal cache.
+On each reconciliation of a DNSResolver, the controller first queries the API server for endpoints of the DNS service (by default kube-dns in namespace kube-system). It adds each endpoint to its list of DNS servers (but not the service ClusterIP). It then queries each DNS server for A records for each of the domains in the DNSResolver. (It is necessary to query all servers, since each server has its own internal cache.)
 
-The IP addressess are then appended to an IPMap with the same name, if they are not already in that IPMap. An internal cache in the controller is also updated with the last time that each IP address was encountered. Finally, IP addresses in the IPMap that have not been seen for a certain amount of time are deleted.
+The IP addressess are then appended to an IPMap and NetworkPolicy with the same name. An internal cache in the controller is also updated with the last time that each IP address was encountered. Finally, IP addresses that have not been seen for a certain amount of time (`IP_EXPIRATION`) are deleted.
 
 The DNSResolver is requeued for reconciliation when the earliest cache expires in the full list of records it received (based on the TTL response).
 
-The user is responsible for generating NetworkPolicies on the basis of IPMaps. I recommend to use Kyverno ([see below](#set-up-an-egress-firewall-using-kyverno)).
+### Potential instability
 
-### WARNING: potential instability
+Whenever a DNS server clears it cache, there is a period of about 2 seconds when NetworkPolicies are not yet updated with the new IP addresses. This means that connection attempts to these hostnames might fail for about 2 seconds. This problem is best resolved by using the [k8s_cache plugin](https://github.com/delta10/k8s_cache).
 
-Whenever a DNS server clears it cache, there is a period of about 2 seconds when any NetworkPolicies are not yet updated with the new IP addresses. If the intention is to whitelist hostnames for egress traffic, this means that connection attempts to these hostnames might fail for about 2 seconds.
+Without the plugin, a small percentage of requests to hosts with dynamic DNS responses may fail. In my testing with `IP_EXPIRATION` set to "12h", requests to www.google.com eventually have a failure rate of around 0.02%. However, in the first 10 minutes, the failure rate is about 1%.
 
-To solve this completely, a CoreDNS plugin needs to be written that delivers new records to our controller a few seconds before it refreshes the cache for other clients.
-
-As long as this plugin does not exist, there are a few things you can do to reduce the amount of connection failures:
-- Ensure that all pods in the cluster use kube-dns for DNS resolution.
-- Make sure that the DNS service sends the remaining cache duration as TTL, which is the default in CoreDNS (see the `keepttl` option [in CoreDNS](https://coredns.io/plugins/cache/)).
-- Increase the cache duration of the DNS service ([see below](#coredns)).
-- Set a higher IPExpiration (see [Environment variables](#environment-variables)). This is the amount of time that IPs are stored in an IPMap since they were last seen in a DNS response.
+When not using k8s_cache, there are a few things you can do to reduce the amount of connection failures:
+- Ensure that all pods in the cluster use a caching DNS server. The instances of this server should be endpoints of a Kubernetes service. dns-resolution-operator should be configured to use this service ([see below](#environment-variables)).
+- Make sure that the DNS server sends the remaining cache duration as TTL, which is the default in CoreDNS (see the `keepttl` option [in CoreDNS](https://coredns.io/plugins/cache/)).
+- Increase the cache duration of the DNS server ([see below](#coredns)).
+- Set a higher IPExpiration (see [Environment variables](#environment-variables)). This is the amount of time that IPs are remembered since they were last seen in a DNS response.
 
 ### Alternative solutions
 - [egress-operator](https://github.com/monzo/egress-operator) by Monzo. A very smart solution that runs a Layer 4 proxy for each whitelisted domain name. However, you need to run a proxy pod for each whitelisted domain, and you need to install a CoreDNS plugin to redirect traffic to the proxies. See also their [blog post](https://github.com/monzo/egress-operator).
-- [FQDNNetworkPolicies](https://github.com/GoogleCloudPlatform/gke-fqdnnetworkpolicies-golang). The GKE project is no longer maintained, but [there is a fork here](https://github.com/nais/fqdn-policy). The GKE project is quite similar to ours, but doesn't work well with hosts that dynamically return different A records. This project aims to have better stability in those sitations ([see above](#warning-potential-instability)).
+- [FQDNNetworkPolicies](https://github.com/GoogleCloudPlatform/gke-fqdnnetworkpolicies-golang). The GKE project is no longer maintained, but [there is a fork here](https://github.com/nais/fqdn-policy). The GKE project is quite similar to ours, but doesn't work well with hosts that dynamically return different A records. This project aims to have better stability in those sitations ([see above](#potential-instability)).
 - Service meshes such as Istio ([see docs](https://istio.io/latest/docs/tasks/traffic-management/egress/egress-control)) can be used to create an HTTPS egress proxy that only allows traffic to certain hostnames. Such a solution does not use DNS at all but TLS SNI (Server Name Indication). However, it can only be used for HTTPS traffic.
 - Some network plugins have a DNS-based solution, like CiliumNetworkPolicies ([see docs](https://docs.cilium.io/en/stable/security/policy/language/#dns-based)).
 - There is a [proposal](https://github.com/kubernetes-sigs/network-policy-api/blob/main/npeps/npep-133.md) to extend the NetworkPolicy API with an FQDN selector.
@@ -152,49 +147,16 @@ The following environment variable control the behaviour of the controller.
 |---------------- | --------------- | --------------- |
 | DNS_ENABLE_IPV6    | Set to `1` to do AAAA lookups    | `0`    |
 | DNS_ENVIRONMENT    | `kubernetes`: use kube-dns pods as DNS servers<br>`resolv.conf`: use all DNS servers from `/etc/resolv.conf`<br>`resolv.conf-tcp`: same as `resolv.conf` but use TCP instead of UDP | `kubernetes`    |
-|  IP_EXPIRATION  | How long to keep IPs that have not been seen in IPMaps (uses [ParseDuration](https://pkg.go.dev/time#ParseDuration))   | `12h`   |
-| MAX_REQUEUE_TIME   | How many seconds to wait until reconciling a DNSResolver after a reconciliation   | `3600`   |
+| DNS_UPSTREAM_SERVICE    | Name of the cluster DNS service in namespace kube-system    | `kube-dns`    |
+|  IP_EXPIRATION  | How long to keep IPs that have not been seen in IPMaps (uses [ParseDuration](https://pkg.go.dev/time#ParseDuration))   | `1h`   |
+| MAX_REQUEUE_TIME   | The maximum seconds to wait to reconcile a DNSResolver after a successful reconciliation   | `3600`   |
 
-
-### Set up an egress firewall using Kyverno
-
-Kyverno can be used to generate NetworkPolicies to your liking with IPMaps as input. For example. the following Kyverno ClusterPolicy will create an egress whitelist for every IPMap, with the same name and namespace.
-
-```yaml
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
-metadata:
-  name: ip-whitelist
-spec:
-  generateExisting: true
-  rules:
-  - name: generate-whitelists
-    match:
-      any:
-      - resources:
-          kinds:
-          - dns.k8s.delta10.nl/v1alpha1/IPMap
-    generate:
-      apiVersion: networking.k8s.io/v1
-      kind: NetworkPolicy
-      name: "{{request.object.metadata.name}}"
-      namespace: "{{request.object.metadata.namespace}}"
-      synchronize: true
-      data:
-        spec:
-          # select all pods in the namespace
-          podSelector: {}
-          policyTypes:
-            - Egress
-          egress:
-            - to: "{{ (request.object.data.domains[].ips)[] | map(&{cidr: @}, @) | items(@, 'foo', 'ipBlock') }}"
-            # the above is a workaround. the below doesn't work; see https://github.com/kyverno/kyverno/issues/9668
-            # - to: "{{(request.object.data.domains[].ips)[] | map(&{ipBlock: {cidr: @} }, @)}}"
-```
 
 ### CoreDNS
 
-When `dns-resolution-operator` is used to create a NetworkPolicy firewall, it is advisable to increase the default cache duration for external domains. Below is a suggested configuration.
+It is best to setup CoreDNS with k8s_cache instead of cache. For instructions see [k8s_cache](https://github.com/delta10/k8s_cache).
+
+If you are not using k8s_cache, stability might improve if you increase the cache for external domains. For example:
 
 ```yaml
 apiVersion: v1
@@ -223,6 +185,5 @@ The operator comes with two custom resources: `dnsresolvers.dns.k8s.delta10.nl` 
 ## Roadmap
 
 Plans for the future:
-- Create a CoreDNS plugin to completely get rid of instability
-- Add a method to directly create NetworkPolicies instead of IPMaps
+- Create a custom resource to have more control over the resulting NetworkPolicy, similar to [FQDNNetworkPolicies](https://github.com/GoogleCloudPlatform/gke-fqdnnetworkpolicies-golang).
 - Create a custom reconciliation queue for a specific combinations of IPMap, DNS server and domain. This will greatly reduce the number of lookups.
