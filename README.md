@@ -105,7 +105,7 @@ When not using k8s_cache, there are a few things you can do to reduce the amount
 ### Helm
 To install the operator with Helm:
 ```sh
-helm install -n dns-resolution-operator dns-resolution-operator --repo https://delta10.github.io/dns-resolution-operator dns-resolution-operator
+helm install --create-namespace --namespace dns-resolution-operator dns-resolution-operator --repo https://delta10.github.io/dns-resolution-operator dns-resolution-operator
 ```
 This should install the CRDs and controller. After installation, check the logs of the controller running in the `dns-resolution-operator` namespace.
 
