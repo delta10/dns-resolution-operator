@@ -86,9 +86,9 @@ The DNSResolver is requeued for reconciliation when the earliest cache expires i
 
 Whenever a DNS server clears it cache, there is a period of about 2 seconds when NetworkPolicies are not yet updated with the new IP addresses. This means that connection attempts to these hostnames might fail for about 2 seconds. This problem is best resolved by using the [k8s_cache plugin](https://github.com/delta10/k8s_cache).
 
-Without the plugin, a small percentage of requests to hosts with dynamic DNS responses may fail. In my testing with `IP_EXPIRATION` set to "12h", requests to www.google.com eventually have a failure rate of around 0.02%. However, in the first 10 minutes, the failure rate is about 1%.
+Without the plugin, a small percentage of requests to hosts with dynamic DNS responses may fail. In my testing with `IP_EXPIRATION` set to "12h", requests to www.google.com eventually have a failure rate close to 0% and similar to a pod without egress policies. However, in the first 10 minutes, the failure rate is about 1%.
 
-When not using k8s_cache, there are a few things you can do to reduce the amount of connection failures:
+There are a few things you can do to reduce the amount of connection failures:
 - Ensure that all pods in the cluster use a caching DNS server. The instances of this server should be endpoints of a Kubernetes service. dns-resolution-operator should be configured to use this service ([see below](#environment-variables)).
 - Make sure that the DNS server sends the remaining cache duration as TTL, which is the default in CoreDNS (see the `keepttl` option [in CoreDNS](https://coredns.io/plugins/cache/)).
 - Increase the cache duration of the DNS server ([see below](#coredns)).
