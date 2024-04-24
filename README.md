@@ -1,3 +1,6 @@
+# Archived
+This project has been superseded by https://github.com/delta10/fqdnnetworkpolicies.
+
 # dns-resolution-operator
 
 <!--toc:start-->
